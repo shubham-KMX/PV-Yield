@@ -31,13 +31,22 @@ class Settings(BaseSettings):
     # Base URLs for the Google APIs. Kept here (not hardcoded in the
     # service) so they're easy to find and change in one place.
     geocoding_base_url: str = "https://maps.googleapis.com/maps/api/geocode/json"
+    staticmap_base_url: str = "https://maps.googleapis.com/maps/api/staticmap"
+
+    # --- satellite imagery defaults ------------------------------------
+    # zoom 21 is the practical sweet spot for rooftops; scale 2 doubles
+    # pixel density (1280x1280) for a sharper mask later.
+    default_zoom: int = 21
+    default_scale: int = 2
+    default_image_size: int = 640  # per-side pixels before scale multiplier
 
     # --- development toggles -------------------------------------------
     # When True, services return realistic canned data instead of calling
     # the paid Google APIs. Lets us build/test the whole pipeline before
-    # billing is active. Flip to False (or set USE_MOCK_GEOCODING=false in
-    # .env) once a billing account is linked and Active.
+    # billing is active. Flip to False (or set USE_MOCK_*=false in .env)
+    # once a billing account is linked and Active.
     use_mock_geocoding: bool = True
+    use_mock_imagery: bool = True
 
     # Tells pydantic-settings to load from a .env file in the current
     # working directory (we run the server from the backend/ folder).

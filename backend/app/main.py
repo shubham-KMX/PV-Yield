@@ -11,10 +11,11 @@ variable named `app`. `--reload` restarts the server automatically
 whenever you save a code change (great for development).
 """
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Response
 from pydantic import BaseModel
 
 from app.services.geocoding import GeocodingError, geocode_address
+from app.services.imagery import ImageryError, fetch_satellite_image
 
 # The FastAPI() instance IS your application. Every endpoint gets
 # attached to it. The title/version show up in the auto-generated
@@ -88,4 +89,62 @@ def geocode(address: str = Query(..., description="Street address to geocode")):
         lat=result.lat,
         lng=result.lng,
         formatted_address=result.formatted_address,
+    )
+
+
+@app.get(
+    "/satellite",
+    responses={200: {"content": {"image/png": {}}}},
+    response_class=Response,
+)
+def satellite(
+    address: str | None = Query(None, description="Address to fetch imagery for"),
+    lat: float | None = Query(None, description="Latitude (use with lng)"),
+    lng: float | None = Query(None, description="Longitude (use with lat)"),
+):
+    """
+    Return the satellite image for a location as a PNG.
+
+    Provide EITHER `address` OR both `lat` and `lng`. If an address is
+    given, we geocode it first, then fetch imagery for the resulting
+    coordinates.
+
+    This endpoint returns raw image bytes (not JSON), so opening it in a
+    browser shows the actual satellite photo. The meters-per-pixel value
+    is returned in a response header for callers that need the geometry.
+    """
+    # Resolve coordinates: prefer explicit lat/lng, else geocode address.
+    if lat is not None and lng is not None:
+        site_lat, site_lng = lat, lng
+    elif address:
+        try:
+            geo = geocode_address(address)
+        except GeocodingError as exc:
+            status_code = 404 if exc.code == "not_found" else 400
+            raise HTTPException(status_code=status_code, detail=exc.message) from exc
+        site_lat, site_lng = geo.lat, geo.lng
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide either 'address' or both 'lat' and 'lng'.",
+        )
+
+    # Fetch the image.
+    try:
+        image = fetch_satellite_image(site_lat, site_lng)
+    except ImageryError as exc:
+        status_code = 502 if exc.code in {"network_error", "http_error"} else 400
+        raise HTTPException(status_code=status_code, detail=exc.message) from exc
+
+    # Return raw PNG bytes. Custom headers expose the geometry + source so
+    # a caller (or curious human) can see meters-per-pixel without a
+    # separate request.
+    return Response(
+        content=image.image_bytes,
+        media_type="image/png",
+        headers={
+            "X-Meters-Per-Pixel": f"{image.m_per_pixel:.6f}",
+            "X-Image-Source": image.source,
+            "X-Coordinates": f"{image.lat},{image.lng}",
+        },
     )
