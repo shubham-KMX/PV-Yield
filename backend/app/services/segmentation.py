@@ -309,3 +309,60 @@ def segment_roof(
         num_points=len(points),
         selection_reason=" | ".join(reasons),
     )
+
+
+def segment_from_polygon(
+    polygon: list[tuple[int, int]],
+    image_shape: tuple[int, int],
+    lat: float,
+    zoom: int,
+    scale: int,
+) -> SegmentationResult:
+    """
+    Build a roof mask from a user-drawn polygon (fully manual selection).
+
+    No ML involved: the polygon vertices the user clicked ARE the roof
+    outline. We rasterize them into a filled mask, then measure area with
+    the same geometry used everywhere else. This is the most reliable
+    selection method — the human traces the exact boundary, so neighbours
+    and courtyards are never included by accident. It also works on roofs
+    where SAM struggles (attached row-houses, low-contrast edges).
+
+    Parameters
+    ----------
+    polygon : ordered list of (x, y) pixel vertices tracing the roof.
+              Needs at least 3 points to enclose an area.
+    image_shape : (height, width) of the satellite image the polygon was
+                  drawn on — the mask is sized to match.
+    lat, zoom, scale : geometry for the pixel -> area conversion.
+
+    Returns the same SegmentationResult type as the SAM path, so it's a
+    drop-in alternative for everything downstream.
+    """
+    if len(polygon) < 3:
+        raise ValueError("A polygon needs at least 3 points to enclose an area.")
+
+    h, w = image_shape
+
+    # Rasterize: start with an empty mask, fill the polygon interior.
+    # cv2.fillPoly expects int32 vertices shaped (n_points, 2).
+    mask_u8 = np.zeros((h, w), dtype=np.uint8)
+    pts = np.array([[int(x), int(y)] for (x, y) in polygon], dtype=np.int32)
+    cv2.fillPoly(mask_u8, [pts], color=1)
+    mask = mask_u8.astype(bool)
+
+    pixel_count = int(mask.sum())
+    area = pixels_to_area(pixel_count, lat, zoom, scale)
+
+    return SegmentationResult(
+        mask=mask,
+        pixel_count=pixel_count,
+        area_m2=round(area["area_m2"], 2),
+        area_sqft=round(area["area_sqft"], 1),
+        m_per_pixel=round(area["m_per_pixel"], 6),
+        score=1.0,  # user-drawn: full confidence by definition
+        image_shape=(h, w),
+        prompt_points=[(int(x), int(y)) for (x, y) in polygon],
+        num_points=len(polygon),
+        selection_reason="manual polygon (user-drawn outline)",
+    )
