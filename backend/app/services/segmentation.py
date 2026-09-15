@@ -226,6 +226,64 @@ def _auto_expand_sections(
     return current, notes
 
 
+def _remove_shadow(
+    image: np.ndarray,
+    mask: np.ndarray,
+    reference_point: tuple[int, int],
+    brightness_ratio: float = 0.65,
+    sample_radius: int = 25,
+    open_kernel: int = 7,
+) -> np.ndarray:
+    """
+    Strip cast-shadow pixels out of a SAM mask.
+
+    Why: SAM often treats a building and its cast shadow as one object,
+    because the shadow is dark, attached, and looks like nearby shaded
+    ground. That inflates the roof area with pixels that aren't roof.
+
+    Method:
+      1. Sample the roof's true brightness in a patch around a point we
+         KNOW is on the roof (the prompt point).
+      2. Drop masked pixels darker than `brightness_ratio` x that reference.
+      3. Morphological opening to break thin shadow "tails".
+      4. Keep only the connected component containing the reference point,
+         so we don't leave floating fragments.
+    """
+    h, w = image.shape[:2]
+    px, py = reference_point
+    px = min(max(px, 0), w - 1)
+    py = min(max(py, 0), h - 1)
+
+    hsv = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
+    v = hsv[..., 2]
+
+    # 1. reference brightness = median of a patch around the roof point.
+    y0, y1 = max(0, py - sample_radius), min(h, py + sample_radius)
+    x0, x1 = max(0, px - sample_radius), min(w, px + sample_radius)
+    ref_v = float(np.median(v[y0:y1, x0:x1]))
+
+    # 2. keep only mask pixels bright enough relative to the roof.
+    bright_enough = v >= (ref_v * brightness_ratio)
+    refined = (mask & bright_enough).astype(np.uint8)
+
+    # 3. opening removes thin shadow tails while keeping the roof body.
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (open_kernel, open_kernel))
+    refined = cv2.morphologyEx(refined, cv2.MORPH_OPEN, kernel)
+
+    # 4. keep only the component containing the reference point.
+    n_labels, labels, stats, _ = cv2.connectedComponentsWithStats(refined, connectivity=8)
+    if n_labels > 1:
+        ref_label = int(labels[py, px])
+        if ref_label > 0:
+            refined = (labels == ref_label).astype(np.uint8)
+        else:
+            # reference fell on a hole — keep the largest non-background blob.
+            largest = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+            refined = (labels == largest).astype(np.uint8)
+
+    return refined.astype(bool)
+
+
 def segment_roof(
     image_bytes: bytes,
     lat: float,
@@ -233,6 +291,7 @@ def segment_roof(
     scale: int,
     prompt_points: list[tuple[int, int]] | tuple[int, int] | None = None,
     auto_expand: bool = False,
+    remove_shadows: bool = True,
 ) -> SegmentationResult:
     """
     Segment the rooftop and measure its ground area.
@@ -280,6 +339,14 @@ def segment_roof(
     reasons: list[str] = []
     for point in points:
         mask, score, reason = _segment_single_point(predictor, point, (h, w))
+        # Strip cast shadows using this point as the roof brightness
+        # reference (we know the point is on the roof).
+        if remove_shadows and mask.any():
+            before = int(mask.sum())
+            mask = _remove_shadow(image, mask, point)
+            dropped = before - int(mask.sum())
+            if dropped > 0:
+                reason += f"; shadow -{dropped}px"
         merged_mask |= mask  # logical OR = union of roof regions
         scores.append(score)
         reasons.append(f"{point}: {reason}")
