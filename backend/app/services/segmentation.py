@@ -32,16 +32,17 @@ MAX_MASK_FRAC = 0.60
 
 @dataclass
 class SegmentationResult:
-    """Result of segmenting a roof."""
+    """Result of segmenting a roof (possibly from multiple prompt points)."""
     mask: np.ndarray            # boolean HxW array: True where roof
     pixel_count: int            # number of True pixels
     area_m2: float
     area_sqft: float
     m_per_pixel: float
-    score: float                # SAM's confidence for the chosen mask
+    score: float                # mean SAM confidence across chosen masks
     image_shape: tuple[int, int]  # (height, width)
-    prompt_point: tuple[int, int]
-    selection_reason: str       # why this mask was chosen (for debugging)
+    prompt_points: list[tuple[int, int]]  # every point used
+    num_points: int             # how many prompt points contributed
+    selection_reason: str       # why each mask was chosen (for debugging)
 
 
 def _pick_best_mask(
@@ -97,60 +98,93 @@ def _pick_best_mask(
     return mask.astype(bool), score, f"no in-range mask; smallest containing ({frac*100:.1f}% of frame)"
 
 
+def _segment_single_point(
+    predictor,
+    point: tuple[int, int],
+    image_shape: tuple[int, int],
+) -> tuple[np.ndarray, float, str]:
+    """
+    Run SAM for ONE foreground point and return the best mask.
+
+    Assumes predictor.set_image() has already been called (the expensive
+    embedding is computed once and reused for every point).
+    """
+    px, py = point
+    point_coords = np.array([[px, py]], dtype=np.float32)
+    point_labels = np.array([1], dtype=np.int32)  # 1 = foreground
+
+    masks, scores, _ = predictor.predict(
+        point_coords=point_coords,
+        point_labels=point_labels,
+        multimask_output=True,  # SAM returns 3 candidates + scores
+    )
+    return _pick_best_mask(masks, scores, point, image_shape)
+
+
 def segment_roof(
     image_bytes: bytes,
     lat: float,
     zoom: int,
     scale: int,
-    prompt_point: tuple[int, int] | None = None,
+    prompt_points: list[tuple[int, int]] | tuple[int, int] | None = None,
 ) -> SegmentationResult:
     """
-    Segment the rooftop at `prompt_point` and measure its ground area.
+    Segment the rooftop and measure its ground area.
 
-    If prompt_point is None, defaults to the image center (a reasonable
-    guess when the map is centered on the building). Later we'll add an
-    automatic picker.
+    `prompt_points` may be:
+      - None: default to the image center (map is usually centered on the
+        building).
+      - a single (x, y) tuple: segment one point (backward compatible).
+      - a list of (x, y) tuples: segment each point and MERGE the masks
+        into one roof. This is how the frontend's "click each roof
+        section" feature captures multi-section / multi-level roofs.
+
+    All points share one image embedding (computed once), so adding points
+    is cheap.
     """
-    # Decode the PNG bytes into an RGB numpy array (H, W, 3), which is
-    # what SAM expects.
+    # Decode the PNG bytes into an RGB numpy array (H, W, 3) for SAM.
     pil_img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
     image = np.array(pil_img)
     h, w = image.shape[:2]
 
-    if prompt_point is None:
-        prompt_point = (w // 2, h // 2)
-    px, py = int(prompt_point[0]), int(prompt_point[1])
+    # Normalize prompt_points into a list of (int, int).
+    if prompt_points is None:
+        points = [(w // 2, h // 2)]
+    elif isinstance(prompt_points, tuple):
+        points = [prompt_points]
+    else:
+        points = list(prompt_points)
+        if not points:
+            points = [(w // 2, h // 2)]
+    points = [(int(x), int(y)) for (x, y) in points]
 
-    # Run SAM: set the image (this computes the image embedding, the
-    # expensive part), then predict with a single foreground point.
+    # Compute the image embedding ONCE, then reuse for every point.
     predictor = get_predictor()
     predictor.set_image(image)
 
-    point_coords = np.array([[px, py]], dtype=np.float32)
-    point_labels = np.array([1], dtype=np.int32)  # 1 = foreground
+    # Segment each point and union the masks together.
+    merged_mask = np.zeros((h, w), dtype=bool)
+    scores: list[float] = []
+    reasons: list[str] = []
+    for point in points:
+        mask, score, reason = _segment_single_point(predictor, point, (h, w))
+        merged_mask |= mask  # logical OR = union of roof regions
+        scores.append(score)
+        reasons.append(f"{point}: {reason}")
 
-    # multimask_output=True -> SAM returns 3 candidate masks + scores.
-    masks, scores, _ = predictor.predict(
-        point_coords=point_coords,
-        point_labels=point_labels,
-        multimask_output=True,
-    )
-
-    # Smart selection: evaluate all 3 candidates with sanity heuristics
-    # instead of blindly taking the top score.
-    mask, score, reason = _pick_best_mask(masks, scores, (px, py), (h, w))
-
-    pixel_count = int(mask.sum())
+    pixel_count = int(merged_mask.sum())
     area = pixels_to_area(pixel_count, lat, zoom, scale)
+    mean_score = float(np.mean(scores)) if scores else 0.0
 
     return SegmentationResult(
-        mask=mask,
+        mask=merged_mask,
         pixel_count=pixel_count,
         area_m2=round(area["area_m2"], 2),
         area_sqft=round(area["area_sqft"], 1),
         m_per_pixel=round(area["m_per_pixel"], 6),
-        score=round(score, 3),
+        score=round(mean_score, 3),
         image_shape=(h, w),
-        prompt_point=(px, py),
-        selection_reason=reason,
+        prompt_points=points,
+        num_points=len(points),
+        selection_reason=" | ".join(reasons),
     )
