@@ -32,6 +32,13 @@ class Settings(BaseSettings):
     # service) so they're easy to find and change in one place.
     geocoding_base_url: str = "https://maps.googleapis.com/maps/api/geocode/json"
 
+    # --- development toggles -------------------------------------------
+    # When True, services return realistic canned data instead of calling
+    # the paid Google APIs. Lets us build/test the whole pipeline before
+    # billing is active. Flip to False (or set USE_MOCK_GEOCODING=false in
+    # .env) once a billing account is linked and Active.
+    use_mock_geocoding: bool = True
+
     # Tells pydantic-settings to load from a .env file in the current
     # working directory (we run the server from the backend/ folder).
     model_config = SettingsConfigDict(
