@@ -14,8 +14,9 @@ removal, and automatic prompt picking.
 """
 
 import io
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
+import cv2
 import numpy as np
 from PIL import Image
 
@@ -121,12 +122,117 @@ def _segment_single_point(
     return _pick_best_mask(masks, scores, point, image_shape)
 
 
+def _auto_expand_sections(
+    predictor,
+    image: np.ndarray,
+    primary_mask: np.ndarray,
+    anchor: tuple[int, int],
+    max_distance_frac: float = 0.15,
+    brightness_tol: float = 0.08,
+    ring_gap_px: int = 10,
+    n_ring_points: int = 24,
+    max_growth_multiple: float = 2.5,
+) -> tuple[np.ndarray, list[str]]:
+    """
+    Conservatively grow `primary_mask` into ADJACENT, roof-like sections
+    of the SAME building, without swallowing neighbours.
+
+    Anti-neighbour design (all tested against the FROZEN primary roof, so
+    the mask can't snowball):
+      (a) brightness similarity to the primary roof (tight tolerance),
+      (b) connectivity to the PRIMARY roof (not the growing mask) — a
+          neighbour separated by a wall/alley/setback fails this,
+      (c) within a small distance cap from the geocoded anchor,
+      (d) each candidate must be SMALLER than the primary roof (a bigger
+          blob is probably a neighbour or courtyard, not a sub-section),
+      (e) a hard cap on TOTAL growth: the final mask may not exceed
+          `max_growth_multiple` x the primary area. A single house does not
+          have hidden sections that triple its footprint.
+
+    Returns (expanded_mask, notes).
+    """
+    h, w = image.shape[:2]
+    hsv = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
+    v = hsv[..., 2].astype(np.float32) / 255.0  # brightness 0..1
+
+    primary_area = int(primary_mask.sum())
+    if primary_area == 0:
+        return primary_mask, ["auto-expand: empty primary mask"]
+
+    roof_v = float(np.median(v[primary_mask]))
+    ax, ay = anchor
+    max_dist = max_distance_frac * min(h, w)
+    max_total_area = int(primary_area * max_growth_multiple)
+
+    # Freeze the anchor: connectivity is always tested against the ORIGINAL
+    # primary roof (dilated once), never the growing result.
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ring_gap_px, ring_gap_px))
+    primary_u8 = primary_mask.astype(np.uint8)
+    primary_dilated = cv2.dilate(primary_u8, kernel, iterations=1).astype(bool)
+
+    # Candidate seeds: a rim just outside the primary roof boundary.
+    rim = primary_dilated & ~primary_mask
+    rim_ys, rim_xs = np.where(rim)
+    if len(rim_xs) == 0:
+        return primary_mask, ["auto-expand: no rim pixels to probe"]
+
+    idxs = np.linspace(0, len(rim_xs) - 1, num=min(n_ring_points, len(rim_xs))).astype(int)
+
+    current = primary_mask.copy()
+    notes: list[str] = []
+    merged_count = 0
+
+    for i in idxs:
+        cx, cy = int(rim_xs[i]), int(rim_ys[i])
+
+        # (c) distance cap from the frozen anchor.
+        if np.hypot(cx - ax, cy - ay) > max_dist:
+            continue
+        # (a) brightness similarity to the primary roof (tight).
+        if abs(float(v[cy, cx]) - roof_v) > brightness_tol:
+            continue
+
+        cand_mask, _score, _reason = _segment_single_point(predictor, (cx, cy), (h, w))
+        cand_area = int(cand_mask.sum())
+        if cand_area == 0:
+            continue
+
+        # (d) candidate must be smaller than the primary roof.
+        if cand_area >= primary_area:
+            continue
+        # size sanity (frame-fraction bounds).
+        frac = cand_area / (h * w)
+        if not (MIN_MASK_FRAC <= frac <= MAX_MASK_FRAC):
+            continue
+        # (b) connectivity to the FROZEN primary roof (not the growing mask).
+        if not (primary_dilated & cand_mask).any():
+            continue
+
+        # (e) hard total-growth cap.
+        candidate_result = current | cand_mask
+        if int(candidate_result.sum()) > max_total_area:
+            notes.append(f"skipped ({cx},{cy}): would exceed {max_growth_multiple}x growth cap")
+            continue
+
+        before = int(current.sum())
+        current = candidate_result
+        gained = int(current.sum()) - before
+        if gained > 0:
+            merged_count += 1
+            notes.append(f"merged section at ({cx},{cy}) +{gained} px")
+
+    if merged_count == 0:
+        notes.append("auto-expand: no adjacent same-building sections found")
+    return current, notes
+
+
 def segment_roof(
     image_bytes: bytes,
     lat: float,
     zoom: int,
     scale: int,
     prompt_points: list[tuple[int, int]] | tuple[int, int] | None = None,
+    auto_expand: bool = False,
 ) -> SegmentationResult:
     """
     Segment the rooftop and measure its ground area.
@@ -138,6 +244,12 @@ def segment_roof(
       - a list of (x, y) tuples: segment each point and MERGE the masks
         into one roof. This is how the frontend's "click each roof
         section" feature captures multi-section / multi-level roofs.
+
+    `auto_expand` (default False, opt-in from the frontend): after
+    segmenting, conservatively grow the mask into ADJACENT, roof-like
+    sections anchored at the image center (the geocoded property). It only
+    merges connected, similar regions within a distance cap, so a
+    neighbour's separate house is excluded. It can never shrink the mask.
 
     All points share one image embedding (computed once), so adding points
     is cheap.
@@ -171,6 +283,15 @@ def segment_roof(
         merged_mask |= mask  # logical OR = union of roof regions
         scores.append(score)
         reasons.append(f"{point}: {reason}")
+
+    # Optional, opt-in: grow into adjacent roof-like sections. Anchored at
+    # the image center (the geocoded property) so neighbours are excluded.
+    if auto_expand and merged_mask.any():
+        anchor = (w // 2, h // 2)
+        merged_mask, expand_notes = _auto_expand_sections(
+            predictor, image, merged_mask, anchor
+        )
+        reasons.extend(expand_notes)
 
     pixel_count = int(merged_mask.sum())
     area = pixels_to_area(pixel_count, lat, zoom, scale)
