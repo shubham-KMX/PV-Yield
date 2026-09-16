@@ -14,6 +14,7 @@ removal, and automatic prompt picking.
 """
 
 import io
+import math
 from dataclasses import dataclass, field
 
 import cv2
@@ -29,6 +30,60 @@ from app.services.sam_model import get_predictor
 # it's probably "everything merged into one blob" (roads + neighbors).
 MIN_MASK_FRAC = 0.02
 MAX_MASK_FRAC = 0.60
+
+
+def auto_pick_prompt_point(
+    image_bytes: bytes,
+    bright_percentile: float = 60.0,
+    min_size_frac: float = 0.005,
+    morph_kernel: int = 15,
+) -> tuple[int, int]:
+    """
+    Pick a sensible default prompt point automatically.
+
+    The satellite image is centered on the geocoded property, and rooftops
+    are usually noticeably brighter than the ground around them (concrete,
+    beige paint, white tile). So we:
+      1. Threshold on HSV brightness to find bright regions.
+      2. Clean noise with morphological open/close.
+      3. Find connected components and score each by
+         size / (1 + distance_to_center) — big AND central wins.
+      4. Return the centroid of the best component.
+
+    Falls back to the image center if nothing plausible is found. This
+    gives the user a first result with zero clicks; they can refine later.
+    """
+    pil = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    rgb = np.array(pil)
+    h, w = rgb.shape[:2]
+    cx, cy = w // 2, h // 2
+
+    v = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)[..., 2]
+    threshold = float(np.percentile(v, bright_percentile))
+    bright = (v >= threshold).astype(np.uint8)
+
+    # Clean speckle: open removes tiny bright specks, close fills small holes.
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (morph_kernel, morph_kernel))
+    bright = cv2.morphologyEx(bright, cv2.MORPH_OPEN, kernel)
+    bright = cv2.morphologyEx(bright, cv2.MORPH_CLOSE, kernel)
+
+    n_labels, _, stats, centroids = cv2.connectedComponentsWithStats(bright, connectivity=8)
+    min_size_px = int(min_size_frac * h * w)
+
+    best_score = -1.0
+    best_xy: tuple[int, int] | None = None
+    for i in range(1, n_labels):  # skip background label 0
+        size = int(stats[i, cv2.CC_STAT_AREA])
+        if size < min_size_px:
+            continue
+        comp_cx, comp_cy = float(centroids[i][0]), float(centroids[i][1])
+        dist = math.hypot(comp_cx - cx, comp_cy - cy)
+        score = size / (1.0 + dist / 100.0)  # big + central scores highest
+        if score > best_score:
+            best_score = score
+            best_xy = (int(round(comp_cx)), int(round(comp_cy)))
+
+    return best_xy if best_xy is not None else (cx, cy)
 
 
 @dataclass
