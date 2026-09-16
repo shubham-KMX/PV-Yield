@@ -17,3 +17,6 @@ git+https://github.com/ChaoningZhang/MobileSAM.git
 
 # --- weather / time-series (NASA POWER) ---
 pandas==2.2.3
+
+# --- solar physics (PVWatts simulation) ---
+pvlib==0.11.2

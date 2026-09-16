@@ -127,6 +127,10 @@ def fetch_hourly_weather(
         "start": f"{year}0101",
         "end": f"{year}1231",
         "format": "JSON",
+        # Force UTC timestamps so they align with pvlib's sun-position
+        # calc. Without this NASA returns Local Solar Time, which puts
+        # "noon" hours in the wrong place and tanks the simulated yield.
+        "time-standard": "UTC",
     }
     try:
         response = httpx.get(settings.nasa_power_base_url, params=params, timeout=60.0)
