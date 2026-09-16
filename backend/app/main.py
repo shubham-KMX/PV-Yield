@@ -16,6 +16,11 @@ from pydantic import BaseModel
 
 from app.services.geocoding import GeocodingError, geocode_address
 from app.services.imagery import ImageryError, fetch_satellite_image
+from app.services.segmentation import (
+    auto_pick_prompt_point,
+    segment_from_polygon,
+    segment_roof,
+)
 
 # The FastAPI() instance IS your application. Every endpoint gets
 # attached to it. The title/version show up in the auto-generated
@@ -35,6 +40,39 @@ class GeocodeResponse(BaseModel):
     lat: float
     lng: float
     formatted_address: str
+
+
+# --- /segment models --------------------------------------------------------
+class SegmentRequest(BaseModel):
+    """
+    Request body for /segment. Provide a location (address OR lat/lng) and
+    optionally how to select the roof.
+
+    Selection modes (in priority order):
+      - polygon: user-drawn outline (most reliable, no ML)
+      - points:  one or more click points for SAM
+      - neither: auto-pick a starting point automatically
+    """
+    address: str | None = None
+    lat: float | None = None
+    lng: float | None = None
+
+    points: list[tuple[int, int]] | None = None      # SAM click points
+    polygon: list[tuple[int, int]] | None = None      # manual outline
+    auto_expand: bool = False                          # opt-in section growth
+    remove_shadows: bool = True                        # SAM path only
+
+
+class SegmentResponse(BaseModel):
+    area_m2: float
+    area_sqft: float
+    m_per_pixel: float
+    pixel_count: int
+    num_points: int
+    prompt_points: list[tuple[int, int]]
+    selection_reason: str
+    coordinates: dict
+    image_source: str
 
 
 @app.get("/")
@@ -147,4 +185,82 @@ def satellite(
             "X-Image-Source": image.source,
             "X-Coordinates": f"{image.lat},{image.lng}",
         },
+    )
+
+
+@app.post("/segment", response_model=SegmentResponse)
+def segment(req: SegmentRequest):
+    """
+    Measure a rooftop's area from a satellite image.
+
+    Chains the whole front of the pipeline: resolve coordinates ->
+    fetch imagery -> segment the roof -> return the measured area.
+
+    POST (not GET) because points/polygon are lists that belong in a JSON
+    body, not a URL query string. Selection mode is chosen from the body:
+    polygon > points > auto-pick.
+    """
+    # 1. Resolve coordinates (explicit lat/lng, else geocode the address).
+    if req.lat is not None and req.lng is not None:
+        site_lat, site_lng = req.lat, req.lng
+    elif req.address:
+        try:
+            geo = geocode_address(req.address)
+        except GeocodingError as exc:
+            code = 404 if exc.code == "not_found" else 400
+            raise HTTPException(status_code=code, detail=exc.message) from exc
+        site_lat, site_lng = geo.lat, geo.lng
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide either 'address' or both 'lat' and 'lng'.",
+        )
+
+    # 2. Fetch the satellite image (carries zoom/scale/m-per-pixel).
+    try:
+        image = fetch_satellite_image(site_lat, site_lng)
+    except ImageryError as exc:
+        code = 502 if exc.code in {"network_error", "http_error"} else 400
+        raise HTTPException(status_code=code, detail=exc.message) from exc
+
+    # 3. Segment, choosing the mode from what the caller supplied.
+    try:
+        if req.polygon:
+            # Manual outline: needs the image dimensions to size the mask.
+            from PIL import Image
+            import io
+            w, h = Image.open(io.BytesIO(image.image_bytes)).size
+            result = segment_from_polygon(
+                polygon=req.polygon,
+                image_shape=(h, w),
+                lat=image.lat,
+                zoom=image.zoom,
+                scale=image.scale,
+            )
+        else:
+            # SAM path: use supplied points, or auto-pick one if none given.
+            points = req.points or [auto_pick_prompt_point(image.image_bytes)]
+            result = segment_roof(
+                image_bytes=image.image_bytes,
+                lat=image.lat,
+                zoom=image.zoom,
+                scale=image.scale,
+                prompt_points=points,
+                auto_expand=req.auto_expand,
+                remove_shadows=req.remove_shadows,
+            )
+    except ValueError as exc:
+        # e.g. a polygon with fewer than 3 points.
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return SegmentResponse(
+        area_m2=result.area_m2,
+        area_sqft=result.area_sqft,
+        m_per_pixel=result.m_per_pixel,
+        pixel_count=result.pixel_count,
+        num_points=result.num_points,
+        prompt_points=result.prompt_points,
+        selection_reason=result.selection_reason,
+        coordinates={"lat": image.lat, "lng": image.lng},
+        image_source=image.source,
     )
