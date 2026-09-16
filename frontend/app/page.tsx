@@ -17,6 +17,10 @@ import Header from "./components/Header";
 import Hero from "./components/Hero";
 import HowItWorks from "./components/HowItWorks";
 import RoofSelector from "./components/RoofSelector";
+import AnalysisOptions, {
+  type FinanceOptions,
+  SUPPORTED_STATES,
+} from "./components/AnalysisOptions";
 import Results from "./components/Results";
 import Footer from "./components/Footer";
 import { analyze, type AnalyzeResult } from "@/lib/api";
@@ -28,6 +32,11 @@ export default function Home() {
   const [result, setResult] = useState<AnalyzeResult | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [finance, setFinance] = useState<FinanceOptions>({
+    state: SUPPORTED_STATES[0].state,
+    discom_key: SUPPORTED_STATES[0].discom_key,
+    monthly_consumption_kwh: 300,
+  });
 
   // Stage 1 -> 2: address geocoded, show the roof selector.
   function handleGeocoded(lat: number, lng: number, address: string) {
@@ -51,6 +60,9 @@ export default function Home() {
         lng: coords.lng,
         points: sel.points,
         polygon: sel.polygon,
+        state: finance.state,
+        discom_key: finance.discom_key,
+        monthly_consumption_kwh: finance.monthly_consumption_kwh,
       });
       setResult(r);
       setTimeout(
@@ -85,6 +97,7 @@ export default function Home() {
                 onAnalyze={handleSelection}
                 loading={analyzing}
               />
+              <AnalysisOptions value={finance} onChange={setFinance} />
               {error && (
                 <p className="mt-4 text-center text-sm font-medium text-sunset-coral">
                   {error}
