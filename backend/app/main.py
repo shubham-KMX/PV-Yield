@@ -32,6 +32,22 @@ app = FastAPI(
     description="Address-to-kWh rooftop solar potential analysis.",
 )
 
+# CORS: the browser blocks a page served from one origin (the Next.js dev
+# server on :3000) from calling an API on another origin (:8000) unless the
+# API explicitly allows it. This middleware adds those permission headers
+# for our local frontend during development.
+from fastapi.middleware.cors import CORSMiddleware
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 # A Pydantic response model describes the SHAPE of what /geocode returns.
 # FastAPI uses it to validate the output, serialize it to JSON, and
