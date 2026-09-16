@@ -21,6 +21,7 @@ from app.services.segmentation import (
     segment_from_polygon,
     segment_roof,
 )
+from app.services.pipeline import run_full_analysis
 
 # The FastAPI() instance IS your application. Every endpoint gets
 # attached to it. The title/version show up in the auto-generated
@@ -264,3 +265,56 @@ def segment(req: SegmentRequest):
         coordinates={"lat": image.lat, "lng": image.lng},
         image_source=image.source,
     )
+
+
+# --- /analyze: the full end-to-end pipeline --------------------------------
+class AnalyzeRequest(BaseModel):
+    """Request body for /analyze — the whole address-to-rupees pipeline."""
+    address: str | None = None
+    lat: float | None = None
+    lng: float | None = None
+
+    # Roof selection (polygon > points > auto-pick).
+    points: list[tuple[int, int]] | None = None
+    polygon: list[tuple[int, int]] | None = None
+    auto_expand: bool = False
+    apply_shading: bool = True
+
+    # Financial context.
+    state: str = "Delhi"
+    discom_key: str = "Delhi (BSES/Tata Power, illustrative)"
+    monthly_consumption_kwh: float = 300.0
+
+
+@app.post("/analyze")
+def analyze(req: AnalyzeRequest):
+    """
+    Run the complete analysis: address -> roof -> panels -> generation ->
+    financials, returned as one bundled result.
+
+    This is the capstone endpoint the frontend calls to produce a full
+    homeowner report from a single request.
+    """
+    try:
+        result = run_full_analysis(
+            address=req.address,
+            lat=req.lat,
+            lng=req.lng,
+            points=req.points,
+            polygon=req.polygon,
+            auto_expand=req.auto_expand,
+            apply_shading=req.apply_shading,
+            state=req.state,
+            discom_key=req.discom_key,
+            monthly_consumption_kwh=req.monthly_consumption_kwh,
+        )
+    except GeocodingError as exc:
+        code = 404 if exc.code == "not_found" else 400
+        raise HTTPException(status_code=code, detail=exc.message) from exc
+    except ImageryError as exc:
+        code = 502 if exc.code in {"network_error", "http_error"} else 400
+        raise HTTPException(status_code=code, detail=exc.message) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return result
