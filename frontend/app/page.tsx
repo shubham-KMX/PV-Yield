@@ -22,6 +22,7 @@ import AnalysisOptions, {
   SUPPORTED_STATES,
 } from "./components/AnalysisOptions";
 import Results from "./components/Results";
+import ResultsSkeleton from "./components/ResultsSkeleton";
 import Footer from "./components/Footer";
 import { analyze, type AnalyzeResult } from "@/lib/api";
 
@@ -108,7 +109,16 @@ export default function Home() {
         )}
 
         <HowItWorks />
-        <Results result={result} />
+        {analyzing ? (
+          <section className="px-6 py-16">
+            <div className="mx-auto max-w-[1120px] text-center text-[13px] font-extrabold uppercase tracking-[0.12em] text-sunset-orange">
+              Crunching the numbers…
+            </div>
+            <ResultsSkeleton />
+          </section>
+        ) : (
+          <Results result={result} />
+        )}
       </main>
       <Footer />
     </>

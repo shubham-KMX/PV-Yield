@@ -8,6 +8,7 @@
 import { motion } from "framer-motion";
 import { satelliteImageUrl, type AnalyzeResult } from "@/lib/api";
 import MonthlyChart from "./MonthlyChart";
+import CountUp from "./CountUp";
 
 const inr = (n: number) => "₹" + Math.round(n).toLocaleString("en-IN");
 
@@ -90,9 +91,9 @@ function ResultCards({ result }: { result: AnalyzeResult }) {
         </div>
       </div>
 
-      <Card label="Annual generation" value={`${result.annual_kwh?.toLocaleString("en-IN")}`} unit="kWh" note={`${result.specific_yield} kWh per kWp / year`} />
-      <Card label="Yearly savings" value={inr(fin.annual_savings)} note={`${inr(fin.monthly_savings)} / month off your bill`} highlight />
-      <Card label="Net cost after subsidy" value={inr(fin.net_cost_after_subsidy)} note={`${inr(fin.subsidy.total_subsidy)} subsidy applied`} />
+      <Card label="Annual generation" count={result.annual_kwh ?? 0} unit="kWh" note={`${result.specific_yield} kWh per kWp / year`} />
+      <Card label="Yearly savings" count={fin.annual_savings} prefix="₹" note={`${inr(fin.monthly_savings)} / month off your bill`} highlight />
+      <Card label="Net cost after subsidy" count={fin.net_cost_after_subsidy} prefix="₹" note={`${inr(fin.subsidy.total_subsidy)} subsidy applied`} />
 
       {result.monthly_kwh && <MonthlyChart monthly={result.monthly_kwh} />}
     </motion.div>
@@ -101,13 +102,15 @@ function ResultCards({ result }: { result: AnalyzeResult }) {
 
 function Card({
   label,
-  value,
+  count,
+  prefix = "",
   unit,
   note,
   highlight,
 }: {
   label: string;
-  value: string;
+  count: number;
+  prefix?: string;
   unit?: string;
   note: string;
   highlight?: boolean;
@@ -137,7 +140,8 @@ function Card({
           highlight ? "text-sunset-green" : "text-foreground"
         }`}
       >
-        {value}
+        {prefix}
+        <CountUp value={count} />
         {unit && (
           <span className="ml-1 text-base font-semibold text-sunset-orange-lt">
             {unit}
