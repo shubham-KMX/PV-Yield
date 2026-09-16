@@ -40,13 +40,20 @@ class Settings(BaseSettings):
     default_scale: int = 2
     default_image_size: int = 640  # per-side pixels before scale multiplier
 
+    # --- NASA POWER weather --------------------------------------------
+    # Free hourly solar/weather reanalysis, no API key required.
+    nasa_power_base_url: str = "https://power.larc.nasa.gov/api/temporal/hourly/point"
+    # Which year of weather to pull. A recent complete year, not a true TMY.
+    default_weather_year: int = 2023
+
     # --- development toggles -------------------------------------------
     # When True, services return realistic canned data instead of calling
-    # the paid Google APIs. Lets us build/test the whole pipeline before
-    # billing is active. Flip to False (or set USE_MOCK_*=false in .env)
-    # once a billing account is linked and Active.
+    # the external APIs. Lets us build/test the whole pipeline offline.
+    # Flip to False (or set USE_MOCK_*=false in .env) for live data.
+    # NASA POWER is free (no key), so mock weather defaults OFF.
     use_mock_geocoding: bool = True
     use_mock_imagery: bool = True
+    use_mock_weather: bool = False
 
     # Tells pydantic-settings to load from a .env file in the current
     # working directory (we run the server from the backend/ folder).
