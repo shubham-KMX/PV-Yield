@@ -89,6 +89,30 @@ export async function analyze(req: AnalyzeRequest): Promise<AnalyzeResult> {
   return res.json();
 }
 
+export interface GeocodeResult {
+  lat: number;
+  lng: number;
+  formatted_address: string;
+}
+
+/** Geocode an address to coordinates (used before showing the roof image). */
+export async function geocode(address: string): Promise<GeocodeResult> {
+  const res = await fetch(
+    `${API_URL}/geocode?address=${encodeURIComponent(address)}`,
+  );
+  if (!res.ok) {
+    let detail = `Geocoding failed (${res.status})`;
+    try {
+      const body = await res.json();
+      if (body?.detail) detail = body.detail;
+    } catch {
+      /* keep generic */
+    }
+    throw new Error(detail);
+  }
+  return res.json();
+}
+
 /** URL of the satellite image for a location (served by the backend). */
 export function satelliteImageUrl(params: {
   address?: string;

@@ -8,13 +8,14 @@
  */
 import { useState } from "react";
 import { Sun, Loader2 } from "lucide-react";
-import { analyze, type AnalyzeResult } from "@/lib/api";
+import { geocode } from "@/lib/api";
 
 interface HeroProps {
-  onResult: (result: AnalyzeResult) => void;
+  // Called once the address is geocoded; the page then shows the roof selector.
+  onGeocoded: (lat: number, lng: number, address: string) => void;
 }
 
-export default function Hero({ onResult }: HeroProps) {
+export default function Hero({ onGeocoded }: HeroProps) {
   const [address, setAddress] = useState("E-87, Sarita Vihar, New Delhi");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -24,12 +25,9 @@ export default function Hero({ onResult }: HeroProps) {
     setLoading(true);
     setError(null);
     try {
-      const result = await analyze({ address: address.trim() });
-      onResult(result);
-      // Scroll to the results once they arrive.
-      document
-        .getElementById("results")
-        ?.scrollIntoView({ behavior: "smooth" });
+      // Geocode only — the heavy analysis runs after the user marks the roof.
+      const geo = await geocode(address.trim());
+      onGeocoded(geo.lat, geo.lng, geo.formatted_address);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong.");
     } finally {
@@ -86,7 +84,7 @@ export default function Hero({ onResult }: HeroProps) {
               </>
             ) : (
               <>
-                Analyze <Sun className="h-4 w-4" />
+                Find my roof <Sun className="h-4 w-4" />
               </>
             )}
           </button>

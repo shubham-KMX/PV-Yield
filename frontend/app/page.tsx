@@ -1,29 +1,99 @@
 "use client";
 
 /**
- * Home page — composes the whole landing experience.
+ * Home page — orchestrates the three-stage flow:
  *
- * Holds the shared analysis `result`: the Hero produces it (on submit),
- * the Results section consumes it. This "lift state up" pattern is the
- * standard React way to share data between sibling components.
+ *   1. "search"  : user enters an address (Hero)
+ *   2. "select"  : we show the satellite image; user marks their roof
+ *   3. "results" : full analysis for the chosen selection
+ *
+ * The page owns the shared state (coordinates + result) and moves between
+ * stages. Children stay focused: Hero collects the address, RoofSelector
+ * captures the roof, Results renders the report.
  */
 import { useState } from "react";
 
 import Header from "./components/Header";
 import Hero from "./components/Hero";
 import HowItWorks from "./components/HowItWorks";
+import RoofSelector from "./components/RoofSelector";
 import Results from "./components/Results";
 import Footer from "./components/Footer";
-import type { AnalyzeResult } from "@/lib/api";
+import { analyze, type AnalyzeResult } from "@/lib/api";
+
+type Pt = [number, number];
 
 export default function Home() {
+  const [coords, setCoords] = useState<{ lat: number; lng: number; address: string } | null>(null);
   const [result, setResult] = useState<AnalyzeResult | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Stage 1 -> 2: address geocoded, show the roof selector.
+  function handleGeocoded(lat: number, lng: number, address: string) {
+    setCoords({ lat, lng, address });
+    setResult(null);
+    setError(null);
+    setTimeout(
+      () => document.getElementById("select")?.scrollIntoView({ behavior: "smooth" }),
+      50,
+    );
+  }
+
+  // Stage 2 -> 3: run the full analysis with the chosen roof selection.
+  async function handleSelection(sel: { points?: Pt[]; polygon?: Pt[] }) {
+    if (!coords) return;
+    setAnalyzing(true);
+    setError(null);
+    try {
+      const r = await analyze({
+        lat: coords.lat,
+        lng: coords.lng,
+        points: sel.points,
+        polygon: sel.polygon,
+      });
+      setResult(r);
+      setTimeout(
+        () => document.getElementById("results")?.scrollIntoView({ behavior: "smooth" }),
+        50,
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Analysis failed.");
+    } finally {
+      setAnalyzing(false);
+    }
+  }
 
   return (
     <>
       <Header />
       <main className="flex-1">
-        <Hero onResult={setResult} />
+        <Hero onGeocoded={handleGeocoded} />
+
+        {coords && (
+          <section id="select" className="border-t border-sunset-line px-6 py-16">
+            <div className="mx-auto max-w-[1120px]">
+              <div className="text-center text-[13px] font-extrabold uppercase tracking-[0.12em] text-sunset-orange">
+                Step 2 · Mark your roof
+              </div>
+              <h2 className="mb-8 mt-2 text-center text-3xl font-extrabold tracking-tight">
+                Which rooftop is yours?
+              </h2>
+              <RoofSelector
+                lat={coords.lat}
+                lng={coords.lng}
+                onAnalyze={handleSelection}
+                loading={analyzing}
+              />
+              {error && (
+                <p className="mt-4 text-center text-sm font-medium text-sunset-coral">
+                  {error}
+                </p>
+              )}
+            </div>
+          </section>
+        )}
+
         <HowItWorks />
         <Results result={result} />
       </main>
