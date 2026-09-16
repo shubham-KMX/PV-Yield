@@ -55,6 +55,16 @@ class Settings(BaseSettings):
     use_mock_imagery: bool = True
     use_mock_weather: bool = False
 
+    # --- CORS ----------------------------------------------------------
+    # Comma-separated list of allowed frontend origins. Defaults to local
+    # dev; in production set CORS_ORIGINS to your Vercel URL, e.g.
+    #   CORS_ORIGINS=https://pv-yield.vercel.app
+    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
     # Tells pydantic-settings to load from a .env file in the current
     # working directory (we run the server from the backend/ folder).
     model_config = SettingsConfigDict(

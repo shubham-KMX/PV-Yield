@@ -70,7 +70,7 @@ export default function MonthlyChart({
               border: "1px solid #f2e6da",
               boxShadow: "0 8px 24px rgba(180,120,80,0.15)",
             }}
-            formatter={(v: number) => [`${v.toLocaleString("en-IN")} kWh`, "Generation"]}
+            formatter={(v) => [`${Number(v).toLocaleString("en-IN")} kWh`, "Generation"]}
           />
           <Bar dataKey="kwh" radius={[6, 6, 0, 0]}>
             {data.map((d) => (
