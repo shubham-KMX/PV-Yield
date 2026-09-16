@@ -7,6 +7,7 @@
  */
 import { motion } from "framer-motion";
 import { satelliteImageUrl, type AnalyzeResult } from "@/lib/api";
+import MonthlyChart from "./MonthlyChart";
 
 const inr = (n: number) => "₹" + Math.round(n).toLocaleString("en-IN");
 
@@ -92,6 +93,8 @@ function ResultCards({ result }: { result: AnalyzeResult }) {
       <Card label="Annual generation" value={`${result.annual_kwh?.toLocaleString("en-IN")}`} unit="kWh" note={`${result.specific_yield} kWh per kWp / year`} />
       <Card label="Yearly savings" value={inr(fin.annual_savings)} note={`${inr(fin.monthly_savings)} / month off your bill`} highlight />
       <Card label="Net cost after subsidy" value={inr(fin.net_cost_after_subsidy)} note={`${inr(fin.subsidy.total_subsidy)} subsidy applied`} />
+
+      {result.monthly_kwh && <MonthlyChart monthly={result.monthly_kwh} />}
     </motion.div>
   );
 }
