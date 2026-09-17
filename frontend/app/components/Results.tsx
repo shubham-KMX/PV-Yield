@@ -9,6 +9,7 @@ import { motion } from "framer-motion";
 import { satelliteImageUrl, type AnalyzeResult } from "@/lib/api";
 import MonthlyChart from "./MonthlyChart";
 import CountUp from "./CountUp";
+import Verdict from "./Verdict";
 
 const inr = (n: number) => "₹" + Math.round(n).toLocaleString("en-IN");
 
@@ -28,12 +29,11 @@ export default function Results({ result }: { result: AnalyzeResult | null }) {
             Enter your address above and we’ll measure your rooftop’s solar
             potential.
           </p>
-        ) : result.panel_count === 0 ? (
-          <p className="mt-6 text-center text-sunset-coral">
-            {result.message ?? "No panels fit on the usable roof area."}
-          </p>
         ) : (
-          <ResultCards result={result} />
+          <div className="mt-10">
+            <Verdict result={result} />
+            {result.panel_count > 0 && <ResultCards result={result} />}
+          </div>
         )}
       </div>
     </section>
