@@ -9,7 +9,7 @@
  * back to NATIVE pixels (× 1280/displayWidth) before we hand it to the
  * backend, which reasons in native pixels.
  */
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { MousePointerClick, Pencil, RotateCcw, Sparkles } from "lucide-react";
 import { satelliteImageUrl } from "@/lib/api";
 
@@ -35,12 +35,9 @@ export default function RoofSelector({
   const [mode, setMode] = useState<Mode>("points");
   const [marks, setMarks] = useState<Pt[]>([]); // native-pixel coords
   const imgRef = useRef<HTMLImageElement>(null);
-
-  // Reset the markers whenever the location changes, so a new address
-  // starts with a clean image instead of keeping the previous roof's marks.
-  useEffect(() => {
-    setMarks([]);
-  }, [lat, lng]);
+  // Note: markers reset automatically when the location changes, because
+  // the parent gives this component a `key` tied to lat/lng, which remounts
+  // it fresh. (Cleaner than resetting state inside an effect.)
 
   // Convert a click on the displayed image into NATIVE pixel coords.
   function handleClick(e: React.MouseEvent<HTMLDivElement>) {

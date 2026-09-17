@@ -101,6 +101,7 @@ export default function Home() {
                 Which rooftop is yours?
               </h2>
               <RoofSelector
+                key={`${coords.lat},${coords.lng}`}
                 lat={coords.lat}
                 lng={coords.lng}
                 onAnalyze={handleSelection}
