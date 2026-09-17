@@ -112,6 +112,11 @@ def fetch_hourly_weather(
     if settings.use_mock_weather:
         return _mock_weather(lat, lng, year)
 
+    # PVGIS TMY is the default source — free, keyless, and more accurate
+    # for India than NASA POWER's single year.
+    if settings.weather_source == "pvgis":
+        return _fetch_pvgis_tmy(lat, lng)
+
     # --- disk cache ------------------------------------------------------
     cache_file = _cache_path(lat, lng, year)
     if use_cache and cache_file.exists():
@@ -153,6 +158,49 @@ def fetch_hourly_weather(
     if use_cache:
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
         cache_file.write_text(json.dumps(payload))
+
+    return df
+
+
+def _fetch_pvgis_tmy(lat: float, lng: float) -> pd.DataFrame:
+    """
+    Fetch a Typical Meteorological Year (TMY) from EU JRC PVGIS via pvlib.
+
+    TMY = one representative year assembled from ~15 years (2005-2020) of
+    data, so it's more stable than a single calendar year and, for India,
+    reads noticeably closer to reality than NASA POWER.
+
+    pvlib does the HTTP call, parsing, and column naming for us
+    (map_variables=True -> ghi/dni/dhi/temp_air/wind_speed). We just
+    normalize the index to tz-aware UTC to match the rest of the pipeline.
+    """
+    from pvlib.iotools import get_pvgis_tmy
+
+    try:
+        df, _months, _inputs, _meta = get_pvgis_tmy(
+            latitude=lat, longitude=lng, map_variables=True, timeout=60
+        )
+    except Exception as exc:  # pvlib wraps network/HTTP errors variously
+        raise WeatherError(f"Could not reach PVGIS: {exc}", code="network_error") from exc
+
+    # Keep only the columns our simulation uses.
+    keep = ["ghi", "dni", "dhi", "temp_air", "wind_speed"]
+    missing = [c for c in keep if c not in df.columns]
+    if missing:
+        raise WeatherError(f"PVGIS response missing {missing}.", code="missing_param")
+    df = df[keep].copy()
+
+    # TMY timestamps come from mixed source years; normalize to a single
+    # non-leap year and make them tz-aware UTC so sun-position aligns.
+    idx = df.index
+    if idx.tz is None:
+        idx = idx.tz_localize("UTC")
+    else:
+        idx = idx.tz_convert("UTC")
+    df.index = idx
+
+    for col in ("ghi", "dni", "dhi"):
+        df[col] = df[col].clip(lower=0)
 
     return df
 

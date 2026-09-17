@@ -40,6 +40,13 @@ class Settings(BaseSettings):
     default_scale: int = 2
     default_image_size: int = 640  # per-side pixels before scale multiplier
 
+    # --- weather source ------------------------------------------------
+    # Which provider to use for hourly irradiance/temperature:
+    #   "pvgis" - EU JRC PVGIS TMY (free, keyless, averaged 2005-2020,
+    #             more accurate for India than NASA POWER). Default.
+    #   "nasa"  - NASA POWER single-year (kept as a fallback / comparison).
+    weather_source: str = "pvgis"
+
     # --- NASA POWER weather --------------------------------------------
     # Free hourly solar/weather reanalysis, no API key required.
     nasa_power_base_url: str = "https://power.larc.nasa.gov/api/temporal/hourly/point"
