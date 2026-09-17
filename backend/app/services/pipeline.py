@@ -38,7 +38,11 @@ from app.services.pvwatts import simulate_annual_generation
 from app.services.segmentation import auto_pick_prompt_point, segment_from_polygon, segment_roof
 from app.services.shading import analyze_shading
 from app.services.weather import fetch_hourly_weather
-from app.services.footprints import fetch_building_footprint, footprint_to_pixels
+from app.services.footprints import (
+    fetch_building_footprint,
+    footprint_to_pixels,
+    estimate_azimuth_from_footprint,
+)
 import cv2
 
 # Simple install-cost assumption (₹ per watt). A real quote varies; this is
@@ -102,6 +106,8 @@ def run_full_analysis(
     auto_expand: bool = False,
     apply_shading: bool = True,
     clip_to_footprint: bool = True,
+    tilt: float | None = None,       # None = latitude-based default
+    azimuth: float | None = None,    # None = estimate from footprint, else 180
     state: str = "Delhi",
     discom_key: str = "Delhi (BSES/Tata Power, illustrative)",
     monthly_consumption_kwh: float = 300.0,
@@ -140,6 +146,7 @@ def run_full_analysis(
     # can't spill onto a neighbour. Only for the SAM path (a user-drawn
     # polygon is already precise). Safe: if no footprint is found, skip.
     footprint_clipped = False
+    estimated_azimuth: float | None = None
     if clip_to_footprint and not polygon:
         fp = fetch_building_footprint(site_lat, site_lng)
         if fp is not None:
@@ -147,6 +154,8 @@ def run_full_analysis(
             fp_px = footprint_to_pixels(
                 fp, image.lat, image.lng, image.zoom, image.scale, image_size_px=w
             )
+            # Estimate the roof azimuth from the footprint's orientation.
+            estimated_azimuth = estimate_azimuth_from_footprint(fp_px)
             fp_mask = np.zeros((h, w), dtype=np.uint8)
             cv2.fillPoly(fp_mask, [np.array(fp_px, dtype=np.int32)], 1)
             fp_bool = fp_mask.astype(bool)
@@ -194,7 +203,19 @@ def run_full_analysis(
 
     # 6. Weather + PVWatts generation.
     weather = fetch_hourly_weather(site_lat, site_lng)
-    gen = simulate_annual_generation(weather, site_lat, site_lng, layout.system_size_kw)
+
+    # Resolve azimuth: user override > footprint estimate > south (180).
+    if azimuth is not None:
+        eff_azimuth, azimuth_source = azimuth, "user"
+    elif estimated_azimuth is not None:
+        eff_azimuth, azimuth_source = estimated_azimuth, "footprint"
+    else:
+        eff_azimuth, azimuth_source = 180.0, "default"
+
+    gen = simulate_annual_generation(
+        weather, site_lat, site_lng, layout.system_size_kw,
+        tilt=tilt, azimuth=eff_azimuth,
+    )
 
     # 7. Financials.
     financials = _compute_financials(
@@ -221,6 +242,8 @@ def run_full_analysis(
         "monthly_kwh": gen.monthly_kwh,
         "specific_yield": gen.specific_yield,
         "tilt": gen.tilt,
+        "azimuth": gen.azimuth,
+        "azimuth_source": azimuth_source,
         "financials": financials,
         "image_source": image.source,
     }

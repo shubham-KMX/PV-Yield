@@ -13,7 +13,9 @@ the raw mask is used unchanged (this feature can only ever help).
 import math
 from dataclasses import dataclass
 
+import cv2
 import httpx
+import numpy as np
 
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 
@@ -129,3 +131,55 @@ def footprint_to_pixels(
         py = cy - north_m / m_per_px
         pts.append((int(round(px)), int(round(py))))
     return pts
+
+
+def estimate_azimuth_from_footprint(footprint_px: list[tuple[int, int]]) -> float:
+    """
+    Estimate the panel azimuth (degrees, 180 = due south) from the
+    building's footprint orientation.
+
+    Panels on a roof are laid out aligned to the roof edges. We find the
+    footprint's minimum-area bounding rectangle, take its orientation, and
+    return whichever roof-aligned facing is CLOSEST TO SOUTH (best for the
+    northern hemisphere). This is a genuine, data-driven azimuth estimate
+    from 2D geometry (unlike tilt, which needs 3D data we don't have).
+
+    In image space: +x = east, +y = south (y grows downward). A rectangle
+    edge at angle `theta` from the x-axis has two outward normals; we pick
+    the one nearest due south.
+    """
+    pts = np.array(footprint_px, dtype=np.float32)
+    if len(pts) < 3:
+        return 180.0
+
+    # minAreaRect returns ((cx, cy), (w, h), angle_degrees).
+    (_, _), (rw, rh), angle = cv2.minAreaRect(pts)
+
+    # The rectangle's two edge directions are `angle` and `angle + 90`.
+    # Panels face perpendicular to the longer edge (across the roof slope),
+    # but for a flat-roof frame layout, either facing is possible — so we
+    # consider all four normal directions and choose the one closest to
+    # south (compass 180).
+    #
+    # Convert an image-space direction angle to a compass azimuth where
+    # 0 = north, 90 = east, 180 = south, 270 = west.
+    def image_angle_to_compass(deg: float) -> float:
+        # image +x is east (compass 90), +y is south (compass 180).
+        # a vector at image angle `deg` (from +x, clockwise since y is down)
+        # points to compass = 90 + deg.
+        return (90.0 + deg) % 360.0
+
+    candidates = [
+        image_angle_to_compass(angle),
+        image_angle_to_compass(angle + 90),
+        image_angle_to_compass(angle + 180),
+        image_angle_to_compass(angle + 270),
+    ]
+
+    # Pick the candidate whose angular distance to south (180) is smallest.
+    def dist_to_south(a: float) -> float:
+        d = abs(a - 180.0) % 360.0
+        return min(d, 360.0 - d)
+
+    best = min(candidates, key=dist_to_south)
+    return round(best, 1)

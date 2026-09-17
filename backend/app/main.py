@@ -297,6 +297,10 @@ class AnalyzeRequest(BaseModel):
     auto_expand: bool = False
     apply_shading: bool = True
 
+    # Panel geometry overrides (None = auto/default).
+    tilt: float | None = None
+    azimuth: float | None = None
+
     # Financial context.
     state: str = "Delhi"
     discom_key: str = "Delhi (BSES/Tata Power, illustrative)"
@@ -321,6 +325,8 @@ def analyze(req: AnalyzeRequest):
             polygon=req.polygon,
             auto_expand=req.auto_expand,
             apply_shading=req.apply_shading,
+            tilt=req.tilt,
+            azimuth=req.azimuth,
             state=req.state,
             discom_key=req.discom_key,
             monthly_consumption_kwh=req.monthly_consumption_kwh,

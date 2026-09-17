@@ -43,6 +43,9 @@ export interface AnalyzeResult {
   monthly_kwh?: Record<string, number>;
   specific_yield?: number;
   tilt?: number;
+  azimuth?: number;
+  azimuth_source?: "user" | "footprint" | "default";
+  footprint_clipped?: boolean;
   financials?: Financials;
   image_source?: string;
   message?: string; // e.g. "No panels fit..."
@@ -56,6 +59,8 @@ export interface AnalyzeRequest {
   polygon?: [number, number][];
   auto_expand?: boolean;
   apply_shading?: boolean;
+  tilt?: number | null;
+  azimuth?: number | null;
   state?: string;
   discom_key?: string;
   monthly_consumption_kwh?: number;

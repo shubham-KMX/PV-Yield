@@ -8,7 +8,7 @@
  * We only offer states the backend actually has tariff + net-metering data
  * for (picking an unconfigured state would error on the backend).
  */
-import { Zap, MapPin } from "lucide-react";
+import { Zap, MapPin, Compass, Triangle } from "lucide-react";
 
 // Each supported state maps to its DISCOM tariff key in the backend.
 export const SUPPORTED_STATES: { state: string; discom_key: string }[] = [
@@ -20,6 +20,9 @@ export interface FinanceOptions {
   state: string;
   discom_key: string;
   monthly_consumption_kwh: number;
+  // null = let the backend decide (latitude tilt / footprint azimuth).
+  tilt: number | null;
+  azimuth: number | null;
 }
 
 interface Props {
@@ -83,6 +86,79 @@ export default function AnalysisOptions({ value, onChange }: Props) {
         <p className="mt-1 text-[11px] text-sunset-muted">
           Sets the electricity tariff &amp; net-metering rules.
         </p>
+      </div>
+
+      {/* --- panel angle (optional overrides) --- */}
+      <div className="sm:col-span-2 border-t border-sunset-line pt-4">
+        <div className="mb-3 text-xs font-bold uppercase tracking-wider text-sunset-muted">
+          Panel angle (optional — we estimate these for you)
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          {/* tilt */}
+          <div>
+            <label className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
+              <Triangle className="h-4 w-4 text-sunset-orange" />
+              Tilt
+              <span className="ml-auto text-sunset-orange">
+                {value.tilt === null ? "Auto" : `${value.tilt}°`}
+              </span>
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={value.tilt !== null}
+                onChange={(e) =>
+                  onChange({ ...value, tilt: e.target.checked ? 20 : null })
+                }
+                className="accent-sunset-orange"
+              />
+              <input
+                type="range"
+                min={5}
+                max={45}
+                step={1}
+                disabled={value.tilt === null}
+                value={value.tilt ?? 20}
+                onChange={(e) => onChange({ ...value, tilt: Number(e.target.value) })}
+                className="w-full accent-sunset-orange disabled:opacity-40"
+              />
+            </div>
+          </div>
+
+          {/* azimuth */}
+          <div>
+            <label className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
+              <Compass className="h-4 w-4 text-sunset-orange" />
+              Facing
+              <span className="ml-auto text-sunset-orange">
+                {value.azimuth === null ? "Auto" : `${value.azimuth}°`}
+              </span>
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={value.azimuth !== null}
+                onChange={(e) =>
+                  onChange({ ...value, azimuth: e.target.checked ? 180 : null })
+                }
+                className="accent-sunset-orange"
+              />
+              <input
+                type="range"
+                min={90}
+                max={270}
+                step={5}
+                disabled={value.azimuth === null}
+                value={value.azimuth ?? 180}
+                onChange={(e) => onChange({ ...value, azimuth: Number(e.target.value) })}
+                className="w-full accent-sunset-orange disabled:opacity-40"
+              />
+            </div>
+            <p className="mt-1 text-[11px] text-sunset-muted">
+              90 = East · 180 = South · 270 = West
+            </p>
+          </div>
+        </div>
       </div>
     </div>
   );

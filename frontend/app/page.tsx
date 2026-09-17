@@ -37,6 +37,8 @@ export default function Home() {
     state: SUPPORTED_STATES[0].state,
     discom_key: SUPPORTED_STATES[0].discom_key,
     monthly_consumption_kwh: 300,
+    tilt: null,
+    azimuth: null,
   });
 
   // Stage 1 -> 2: address geocoded, show the roof selector.
@@ -64,6 +66,8 @@ export default function Home() {
         state: finance.state,
         discom_key: finance.discom_key,
         monthly_consumption_kwh: finance.monthly_consumption_kwh,
+        tilt: finance.tilt,
+        azimuth: finance.azimuth,
       });
       setResult(r);
       setTimeout(
