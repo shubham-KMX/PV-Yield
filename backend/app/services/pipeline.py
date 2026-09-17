@@ -38,6 +38,8 @@ from app.services.pvwatts import simulate_annual_generation
 from app.services.segmentation import auto_pick_prompt_point, segment_from_polygon, segment_roof
 from app.services.shading import analyze_shading
 from app.services.weather import fetch_hourly_weather
+from app.services.footprints import fetch_building_footprint, footprint_to_pixels
+import cv2
 
 # Simple install-cost assumption (₹ per watt). A real quote varies; this is
 # an illustrative national average for residential rooftop.
@@ -99,6 +101,7 @@ def run_full_analysis(
     polygon: list[tuple[int, int]] | None = None,
     auto_expand: bool = False,
     apply_shading: bool = True,
+    clip_to_footprint: bool = True,
     state: str = "Delhi",
     discom_key: str = "Delhi (BSES/Tata Power, illustrative)",
     monthly_consumption_kwh: float = 300.0,
@@ -132,6 +135,34 @@ def run_full_analysis(
             image.image_bytes, image.lat, image.zoom, image.scale,
             prompt_points=pts, auto_expand=auto_expand,
         )
+
+    # 3.5. Clip the SAM mask to the real building footprint (OSM), so it
+    # can't spill onto a neighbour. Only for the SAM path (a user-drawn
+    # polygon is already precise). Safe: if no footprint is found, skip.
+    footprint_clipped = False
+    if clip_to_footprint and not polygon:
+        fp = fetch_building_footprint(site_lat, site_lng)
+        if fp is not None:
+            h, w = seg.mask.shape
+            fp_px = footprint_to_pixels(
+                fp, image.lat, image.lng, image.zoom, image.scale, image_size_px=w
+            )
+            fp_mask = np.zeros((h, w), dtype=np.uint8)
+            cv2.fillPoly(fp_mask, [np.array(fp_px, dtype=np.int32)], 1)
+            fp_bool = fp_mask.astype(bool)
+            clipped = seg.mask & fp_bool
+            # Apply the clip whenever it leaves a plausible building-sized
+            # region. This is the whole point: if SAM over-grew across
+            # several buildings, clipping SHOULD remove most of it. We only
+            # skip when the result is essentially empty (a misaligned
+            # footprint), to avoid erasing a good mask entirely.
+            clipped_frac = clipped.sum() / max(fp_bool.sum(), 1)
+            if clipped.sum() > 0 and clipped_frac > 0.05:
+                seg.mask = clipped
+                seg.pixel_count = int(clipped.sum())
+                seg.area_m2 = round(seg.pixel_count * (seg.m_per_pixel ** 2), 2)
+                seg.area_sqft = round(seg.area_m2 * 10.7639, 1)
+                footprint_clipped = True
 
     # 4. Shading -> usable mask (optional refinement).
     usable_mask = seg.mask
@@ -181,6 +212,7 @@ def run_full_analysis(
         "formatted_address": formatted,
         "roof_area_m2": seg.area_m2,
         "usable_area_m2": layout.usable_area_m2,
+        "footprint_clipped": footprint_clipped,
         "shading": shading_summary,
         "panel_count": layout.panel_count,
         "system_size_kw": layout.system_size_kw,
