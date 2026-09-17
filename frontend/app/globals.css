@@ -45,6 +45,31 @@ body {
   color: transparent;
 }
 
+/* --- print / PDF export -------------------------------------------------
+   When printing, hide everything except the results report, and neutralize
+   the dark footer / interactive controls so it saves as a clean PDF. */
+@media print {
+  /* Hide anything marked no-print (header, hero, footer, buttons). */
+  .no-print {
+    display: none !important;
+  }
+  /* Only the report area prints; drop its section padding. */
+  #results {
+    padding: 0 !important;
+  }
+  body {
+    background: #fff !important;
+  }
+  /* Show the print-only header (address + date). */
+  .print-only {
+    display: block !important;
+  }
+}
+/* The print header is hidden on screen, shown only when printing. */
+.print-only {
+  display: none;
+}
+
 /* The glowing sun orb used in the header + hero. */
 .sun-orb {
   border-radius: 9999px;

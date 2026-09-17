@@ -7,6 +7,7 @@
  */
 import { motion } from "framer-motion";
 import { satelliteImageUrl, type AnalyzeResult } from "@/lib/api";
+import { Download } from "lucide-react";
 import MonthlyChart from "./MonthlyChart";
 import CountUp from "./CountUp";
 import Verdict from "./Verdict";
@@ -53,6 +54,14 @@ function ResultCards({ result }: { result: AnalyzeResult }) {
       transition={{ duration: 0.4 }}
       className="mt-10 grid gap-[18px] md:grid-cols-3"
     >
+      {/* print-only header: shows in the saved PDF, hidden on screen */}
+      <div className="print-only col-span-full mb-2">
+        <div className="text-2xl font-extrabold">PV-Yield — Solar Report</div>
+        <div className="text-sm text-sunset-muted">
+          {result.formatted_address} · generated {new Date().toLocaleDateString("en-IN")}
+        </div>
+      </div>
+
       {/* wide roof card */}
       <div className="relative col-span-full flex flex-col items-center gap-6 overflow-hidden rounded-[20px] border border-sunset-line bg-white p-6 shadow-[0_8px_26px_rgba(180,120,80,0.08)] md:flex-row">
         <img
@@ -96,6 +105,16 @@ function ResultCards({ result }: { result: AnalyzeResult }) {
       <Card label="Net cost after subsidy" count={fin.net_cost_after_subsidy} prefix="₹" note={`${inr(fin.subsidy.total_subsidy)} subsidy applied`} />
 
       {result.monthly_kwh && <MonthlyChart monthly={result.monthly_kwh} />}
+
+      {/* download / print — hidden in the printed PDF itself */}
+      <div className="no-print col-span-full flex justify-center pt-2">
+        <button
+          onClick={() => window.print()}
+          className="flex items-center gap-2 rounded-xl border border-sunset-line bg-white px-6 py-3 text-sm font-bold text-sunset-orange shadow-[0_6px_20px_rgba(249,115,22,0.12)] transition-transform hover:scale-[1.02]"
+        >
+          <Download className="h-4 w-4" /> Download report (PDF)
+        </button>
+      </div>
     </motion.div>
   );
 }

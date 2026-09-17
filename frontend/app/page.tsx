@@ -79,12 +79,16 @@ export default function Home() {
 
   return (
     <>
-      <Header />
+      <div className="no-print">
+        <Header />
+      </div>
       <main className="flex-1">
-        <Hero onGeocoded={handleGeocoded} />
+        <div className="no-print">
+          <Hero onGeocoded={handleGeocoded} />
+        </div>
 
         {coords && (
-          <section id="select" className="border-t border-sunset-line px-6 py-16">
+          <section id="select" className="no-print border-t border-sunset-line px-6 py-16">
             <div className="mx-auto max-w-[1120px]">
               <div className="text-center text-[13px] font-extrabold uppercase tracking-[0.12em] text-sunset-orange">
                 Step 2 · Mark your roof
@@ -108,9 +112,11 @@ export default function Home() {
           </section>
         )}
 
-        <HowItWorks />
+        <div className="no-print">
+          <HowItWorks />
+        </div>
         {analyzing ? (
-          <section className="px-6 py-16">
+          <section className="no-print px-6 py-16">
             <div className="mx-auto max-w-[1120px] text-center text-[13px] font-extrabold uppercase tracking-[0.12em] text-sunset-orange">
               Crunching the numbers…
             </div>
@@ -120,7 +126,9 @@ export default function Home() {
           <Results result={result} />
         )}
       </main>
-      <Footer />
+      <div className="no-print">
+        <Footer />
+      </div>
     </>
   );
 }
